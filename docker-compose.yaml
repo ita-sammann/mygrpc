@@ -1,0 +1,19 @@
+version: "3.8"
+services:
+  mygrpc:
+    build: .
+    image: "mygrpc:local"
+    container_name: "mygrpc"
+    restart: "unless-stopped"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mygrpc.entrypoints=websecure"
+      - "traefik.http.routers.mygrpc.rule=Host(`grpc.sammann.ru`)"
+      - "traefik.http.routers.mygrpc.tls=true"
+      - "traefik.http.routers.mygrpc.tls.certResolver=default"
+      - "traefik.http.services.mygrpc.loadbalancer.server.scheme=h2c"
+      - "traefik.http.services.mygrpc.loadbalancer.server.port=50051"
+networks:
+  default:
+    external:
+      name: "traefik"
