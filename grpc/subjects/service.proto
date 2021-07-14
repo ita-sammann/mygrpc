@@ -1,10 +1,10 @@
 syntax = "proto3";
 
+import "google/api/annotations.proto";
 import "github.com/mwitkow/go-proto-validators/validator.proto";
 
-option go_package = "grpc/subjects";
-
 package subjects;
+option go_package = "grpc/subjects";
 
 enum Gender {
     Undefined = 0;
@@ -23,7 +23,12 @@ message User {
 
 service Subjects {
     rpc Create (CreateRequest) returns (CreateResponse) {}
-    rpc Get (GetRequest) returns (GetResponse) {}
+    rpc Get (GetRequest) returns (GetResponse) {
+        option (google.api.http) = {
+            post: "/subjects/get"
+            body: "*"
+        };
+    }
     rpc Update (UpdateRequest) returns (UpdateResponse) {}
     rpc Delete (DeleteRequest) returns (DeleteResponse) {}
     rpc List (ListRequest) returns (ListResponse) {}

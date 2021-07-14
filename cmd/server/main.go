@@ -4,11 +4,18 @@ import (
 	"context"
 	"log"
 	"net"
+	"net/http"
 
-	"mygrpc/grpc/subjects"
-
+	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"github.com/soheilhy/cmux"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+
+	"mygrpc/grpc/subjects"
+)
+
+const (
+	listenAddr = ":50051"
 )
 
 type subjectsServer struct {
@@ -48,18 +55,53 @@ func (subjectsServer) Get(ctx context.Context, req *subjects.GetRequest) (*subje
 	return &rsp, nil
 }
 
+func serveGRPC(listener net.Listener) {
+	gs := grpc.NewServer()
+	subjects.RegisterSubjectsServer(gs, &subjectsServer{})
+
+	go func() {
+		log.Printf("gRPC server listening at %v", listener.Addr())
+		err := gs.Serve(listener)
+		if err != nil {
+			log.Fatalf("Failed to serve gRPC: %v", err)
+		}
+	}()
+}
+
+func serveHTTP(listener net.Listener) {
+	mux := runtime.NewServeMux()
+	err := subjects.RegisterSubjectsHandlerFromEndpoint(context.Background(), mux, listenAddr, []grpc.DialOption{grpc.WithInsecure()})
+	if err != nil {
+		log.Fatalf("Failed to register gRPC-Gateway handler: %v", err)
+	}
+
+	go func() {
+		log.Printf("HTTP server listening at %v", listener.Addr())
+		err = http.Serve(listener, mux)
+		if err != nil {
+			log.Fatalf("Failed to serve HTTP: %v", err)
+		}
+	}()
+}
+
 func main() {
-	lis, err := net.Listen("tcp", ":50051")
+	lis, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		log.Fatalf("Failed to listen: %v", err)
 	}
 
-	gs := grpc.NewServer()
-	subjects.RegisterSubjectsServer(gs, &subjectsServer{})
+	// Setup multiplexer for gRPC and HTTP servers
+	mux := cmux.New(lis)
 
-	log.Printf("Server listening at %v", lis.Addr())
-	err = gs.Serve(lis)
+	lisGrpc := mux.Match(cmux.HTTP2HeaderField("content-type", "application/grpc"))
+	lisHttp := mux.Match(cmux.Any())
+
+	serveGRPC(lisGrpc)
+	serveHTTP(lisHttp)
+
+	log.Printf("Multiplexer started on %v", lis.Addr())
+	err = mux.Serve()
 	if err != nil {
-		log.Fatalf("Failed to serve: %v", err)
+		log.Fatalf("Failed to serve multiplexer: %v", err)
 	}
 }

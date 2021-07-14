@@ -241,5 +241,5 @@ var Subjects_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "service.proto",
+	Metadata: "subjects/service.proto",
 }
