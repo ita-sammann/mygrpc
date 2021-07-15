@@ -3,11 +3,12 @@ package main
 import (
 	"context"
 	"log"
-	"net"
 	"net/http"
+	"strings"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
-	"github.com/soheilhy/cmux"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
@@ -15,7 +16,9 @@ import (
 )
 
 const (
-	listenAddr = ":50051"
+	listenPort = "50051"
+	listenAddr = ":" + listenPort
+	localAddr  = "localhost:" + listenPort
 )
 
 type subjectsServer struct {
@@ -55,53 +58,29 @@ func (subjectsServer) Get(ctx context.Context, req *subjects.GetRequest) (*subje
 	return &rsp, nil
 }
 
-func serveGRPC(listener net.Listener) {
+func handlerFunc(grpcServer *grpc.Server, httpHandler http.Handler) http.Handler {
+	return h2c.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor == 2 && strings.Contains(r.Header.Get("Content-Type"), "application/grpc") {
+			grpcServer.ServeHTTP(w, r)
+		} else {
+			httpHandler.ServeHTTP(w, r)
+		}
+	}), &http2.Server{})
+}
+
+func main() {
 	gs := grpc.NewServer()
 	subjects.RegisterSubjectsServer(gs, &subjectsServer{})
 
-	go func() {
-		log.Printf("gRPC server listening at %v", listener.Addr())
-		err := gs.Serve(listener)
-		if err != nil {
-			log.Fatalf("Failed to serve gRPC: %v", err)
-		}
-	}()
-}
-
-func serveHTTP(listener net.Listener) {
 	mux := runtime.NewServeMux()
-	err := subjects.RegisterSubjectsHandlerFromEndpoint(context.Background(), mux, listenAddr, []grpc.DialOption{grpc.WithInsecure()})
+	err := subjects.RegisterSubjectsHandlerFromEndpoint(context.Background(), mux, localAddr, []grpc.DialOption{grpc.WithInsecure()})
 	if err != nil {
 		log.Fatalf("Failed to register gRPC-Gateway handler: %v", err)
 	}
 
-	go func() {
-		log.Printf("HTTP server listening at %v", listener.Addr())
-		err = http.Serve(listener, mux)
-		if err != nil {
-			log.Fatalf("Failed to serve HTTP: %v", err)
-		}
-	}()
-}
-
-func main() {
-	lis, err := net.Listen("tcp", listenAddr)
+	log.Printf("Server started on %v", listenAddr)
+	err = http.ListenAndServe(listenAddr, handlerFunc(gs, mux))
 	if err != nil {
-		log.Fatalf("Failed to listen: %v", err)
-	}
-
-	// Setup multiplexer for gRPC and HTTP servers
-	mux := cmux.New(lis)
-
-	lisGrpc := mux.Match(cmux.HTTP2HeaderField("content-type", "application/grpc"))
-	lisHttp := mux.Match(cmux.Any())
-
-	serveGRPC(lisGrpc)
-	serveHTTP(lisHttp)
-
-	log.Printf("Multiplexer started on %v", lis.Addr())
-	err = mux.Serve()
-	if err != nil {
-		log.Fatalf("Failed to serve multiplexer: %v", err)
+		log.Fatalf("Failed to serve: %v", err)
 	}
 }
